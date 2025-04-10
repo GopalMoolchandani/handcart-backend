@@ -1,5 +1,6 @@
 package com.backend.handcart.order_service.service;
 
+import com.backend.handcart.order_service.dto.InventoryResponse;
 import com.backend.handcart.order_service.dto.OrderLineItemsDto;
 import com.backend.handcart.order_service.dto.OrderRequest;
 import com.backend.handcart.order_service.model.Order;
@@ -11,6 +12,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -18,7 +21,7 @@ import java.util.UUID;
 @Transactional
 public class OrderService {
     private final OrderRepository orderRepository;
-    private final WebClient webClient;
+    private final WebClient.Builder webClientBuilder;
     public void placeOrder(OrderRequest orderRequest) {
         Order order = new Order();
         order.setOrderNumber(UUID.randomUUID().toString());
@@ -26,12 +29,16 @@ public class OrderService {
                 .stream()
                 .map(this::mapToDto)
                 .toList());
-        Boolean result = webClient.get()
-                .uri("http://localhost:8085/api/inventory/")
+        List<String> skuCodes = order.getOrderLineItemsList().stream()
+                .map(OrderLineItems::getSkuCode).toList();
+        InventoryResponse[] inventoryResponses = webClientBuilder.build().get()
+                .uri("http://inventory-service/api/inventory",
+                        uriBuilder -> uriBuilder.queryParam("skuCodeList", skuCodes).build())
                 .retrieve()
-                .bodyToMono(Boolean.class)
+                .bodyToMono(InventoryResponse[].class)
                 .block();
-        if (result) {
+        boolean allProductsInStock = Arrays.stream(inventoryResponses).allMatch(InventoryResponse::isInStock);
+        if (allProductsInStock) {
             orderRepository.save(order);
         } else {
             throw new IllegalArgumentException("Product is not in stock, please try again");
